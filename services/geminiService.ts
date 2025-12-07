@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { Lead, LeadResponse, GroundingSource } from "../types";
 
-export const generateLeads = async (category: string, city: string): Promise<LeadResponse> => {
+export const generateLeads = async (category: string, city: string, excludedNames: string[] = []): Promise<LeadResponse> => {
   // Initialize inside the function to ensure process.env.API_KEY is available at runtime
   const apiKey = process.env.API_KEY || "";
   
@@ -11,8 +11,17 @@ export const generateLeads = async (category: string, city: string): Promise<Lea
 
   const ai = new GoogleGenAI({ apiKey });
 
+  let exclusionInstruction = "";
+  if (excludedNames.length > 0) {
+    exclusionInstruction = `
+    IMPORTANT: The user has already seen these businesses: ${JSON.stringify(excludedNames)}.
+    You MUST find DIFFERENT businesses. Do not include any of the names listed above.
+    `;
+  }
+
   const prompt = `
     Find 8-10 ACTIVE business leads for the category "${category}" in "${city}".
+    ${exclusionInstruction}
     
     Use Google Search to find real, operating businesses.
     Prioritize businesses where you can find a public email address or a specific contact page.

@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { LayoutGrid, MapPin, Search, Loader2, Sparkles, Download, AlertCircle } from 'lucide-react';
+import { LayoutGrid, MapPin, Search, Loader2, Sparkles, Download, AlertCircle, PlusCircle } from 'lucide-react';
 import AutocompleteInput from './components/AutocompleteInput';
 import LeadCard from './components/LeadCard';
 import EmptyState from './components/EmptyState';
@@ -21,8 +21,12 @@ const App: React.FC = () => {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [sources, setSources] = useState<GroundingSource[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [loadingMsgIndex, setLoadingMsgIndex] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  
+  // Track the search parameters of the current results to support "Load More" correctly
+  const [lastSearch, setLastSearch] = useState<{category: string, city: string} | null>(null);
 
   // Cycle through loading messages
   useEffect(() => {
@@ -46,6 +50,7 @@ const App: React.FC = () => {
     setError(null);
     setLeads([]);
     setSources([]);
+    setLastSearch(null);
 
     try {
       const result = await generateLeads(category, city);
@@ -55,6 +60,7 @@ const App: React.FC = () => {
       } else {
         setLeads(result.leads);
         setSources(result.sources);
+        setLastSearch({ category, city });
       }
     } catch (err: any) {
       console.error(err);
@@ -63,6 +69,37 @@ const App: React.FC = () => {
       setLoading(false);
     }
   }, [category, city]);
+
+  const handleLoadMore = async () => {
+    if (!lastSearch) return;
+
+    setLoadingMore(true);
+    // Don't clear error if it's just a load more failure, but maybe show a toast in future.
+    // For now we will display error at top if it fails.
+    
+    try {
+      const currentNames = leads.map(l => l.name);
+      const result = await generateLeads(lastSearch.category, lastSearch.city, currentNames);
+
+      // Filter out any duplicates that might have slipped through
+      const newLeads = result.leads.filter(newLead => 
+        !leads.some(existing => existing.name.toLowerCase() === newLead.name.toLowerCase())
+      );
+
+      if (newLeads.length === 0) {
+        setError("No more unique leads found for this search.");
+      } else {
+        setLeads(prev => [...prev, ...newLeads]);
+        setSources(prev => [...prev, ...result.sources]);
+        setError(null); // Clear any previous errors if successful
+      }
+    } catch (err: any) {
+      console.error(err);
+      setError("Failed to load more leads. Please try again.");
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const handleExport = () => {
     if (leads.length === 0) return;
@@ -89,8 +126,11 @@ const App: React.FC = () => {
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
+    const exportCategory = lastSearch ? lastSearch.category : category;
+    const exportCity = lastSearch ? lastSearch.city : city;
+    
     link.setAttribute("href", url);
-    link.setAttribute("download", `leads_${category.replace(/\s+/g, '_')}_${city.replace(/\s+/g, '_')}.csv`);
+    link.setAttribute("download", `leads_${exportCategory.replace(/\s+/g, '_')}_${exportCity.replace(/\s+/g, '_')}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
@@ -183,7 +223,7 @@ const App: React.FC = () => {
               <h2 className="text-2xl font-bold text-slate-100 flex items-center">
                 Found {leads.length} Leads
                 <span className="ml-3 px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400 text-xs font-normal border border-slate-700">
-                  {category} in {city}
+                  {lastSearch?.category} in {lastSearch?.city}
                 </span>
               </h2>
               <button 
@@ -197,8 +237,29 @@ const App: React.FC = () => {
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {leads.map((lead, index) => (
-                <LeadCard key={index} lead={lead} index={index} />
+                <LeadCard key={`${lead.name}-${index}`} lead={lead} index={index} />
               ))}
+            </div>
+
+            {/* Load More Button */}
+            <div className="mt-10 flex justify-center">
+              <button
+                onClick={handleLoadMore}
+                disabled={loadingMore}
+                className="group relative inline-flex items-center justify-center px-8 py-3 text-sm font-medium text-white transition-all duration-200 bg-slate-800 border border-slate-700 rounded-full hover:bg-slate-700 hover:border-slate-600 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loadingMore ? (
+                  <>
+                    <Loader2 size={18} className="mr-2 animate-spin text-blue-400" />
+                    Finding more leads...
+                  </>
+                ) : (
+                  <>
+                    <PlusCircle size={18} className="mr-2 text-blue-400 group-hover:scale-110 transition-transform" />
+                    Find More Leads
+                  </>
+                )}
+              </button>
             </div>
 
             {/* Grounding Sources */}
@@ -206,7 +267,7 @@ const App: React.FC = () => {
               <div className="mt-16 pt-8 border-t border-slate-800">
                 <h3 className="text-sm font-semibold text-slate-400 mb-4 uppercase tracking-wider">Information Sources</h3>
                 <div className="flex flex-wrap gap-2">
-                  {sources.slice(0, 10).map((source, idx) => (
+                  {sources.slice(0, 15).map((source, idx) => (
                     <a 
                       key={idx}
                       href={source.url}
